@@ -1,0 +1,26 @@
+{
+  "name": "test-2",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "postinstall": "bun run download-yt-dlp.mjs",
+    "dev": "bun run src/main.ts",
+    "start": "bun run index.ts dev"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/tmp": "^0.2.6"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@effect/cli": "^0.37.1",
+    "@effect/platform-node": "^0.96.0",
+    "effect": "^3.17.9",
+    "microsoft-cognitiveservices-speech-sdk": "^1.45.0",
+    "tmp": "^0.2.3",
+    "yt-dlp-wrap": "^2.3.12"
+  }
+}
