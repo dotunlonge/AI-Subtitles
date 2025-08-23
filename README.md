@@ -8,6 +8,40 @@ A TypeScript CLI application that generates AI-powered subtitles from YouTube vi
 
 - [Bun](https://bun.com) runtime (latest stable version)
 - Microsoft Azure Cognitive Services Speech subscription
+- **FFmpeg** - Required for YouTube audio extraction and conversion
+
+#### Installing FFmpeg
+
+FFmpeg is essential for converting YouTube audio to the WAV format required by Microsoft Speech API.
+
+**macOS:**
+```bash
+# Using Homebrew (recommended)
+brew install ffmpeg
+
+# Or download from official site
+# https://ffmpeg.org/download.html#build-mac
+```
+
+**Windows:**
+```bash
+# Using Windows Package Manager
+winget install ffmpeg
+
+# Or download from official site
+# https://ffmpeg.org/download.html#build-windows
+```
+
+**Linux:**
+```bash
+# Ubuntu/Debian
+sudo apt update && sudo apt install ffmpeg
+
+# RHEL/CentOS/Fedora
+sudo yum install ffmpeg
+# or
+sudo dnf install ffmpeg
+```
 
 ### Installation Steps
 
@@ -117,9 +151,20 @@ This application demonstrates advanced Effect framework patterns:
   - Ensure video is public and not age-restricted
   - Try a different video
 
+#### "FFmpeg is required but not found" 
+- **Cause**: FFmpeg is not installed or not available in system PATH
+- **Solutions**:
+  - Install FFmpeg using the instructions in Prerequisites section
+  - Restart your terminal after installation
+  - Verify installation: `ffmpeg -version`
+  - On macOS, ensure Homebrew's bin directory is in your PATH
+
 #### Audio format issues
-- **Cause**: yt-dlp audio extraction problems
-- **Solution**: Application automatically converts to WAV format required by Speech API
+- **Cause**: yt-dlp audio extraction problems or FFmpeg conversion failures
+- **Solutions**: 
+  - Ensure FFmpeg is properly installed and accessible
+  - Application automatically converts to WAV format required by Speech API
+  - Check video accessibility (not private/age-restricted)
 
 #### Network/API errors
 - **Cause**: Network connectivity or API rate limits
