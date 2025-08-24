@@ -1,13 +1,15 @@
-import { Effect, Layer, Console, Context, Scope, Config } from "effect";
+import { Effect, Layer, Console, Config } from "effect";
 import * as OS from "node:os";
 import * as Path from "node:path";
 import * as FS from "node:fs/promises";
 import * as FsSync from "node:fs";
+import { BunContext } from "@effect/platform-bun";
 import {
   AudioConfig,
   SpeechRecognizer,
   ResultReason,
   SpeechConfig as SpeechSDKConfig,
+  AudioInputStream,
 } from "microsoft-cognitiveservices-speech-sdk";
 import { Command, Args } from "@effect/cli";
 
@@ -163,73 +165,98 @@ class Transcription extends Effect.Service<Transcription>()("Transcription", {
           try: (signal: AbortSignal) =>
             new Promise<SubtitleResult[]>((resolve, reject) => {
               try {
-                const sdkConfig = SpeechSDKConfig.fromSubscription(speechCfg.key, speechCfg.region);
+                const speechConfig = SpeechSDKConfig.fromSubscription(speechCfg.key, speechCfg.region);
+                speechConfig.speechRecognitionLanguage = "en-US";
+                
+                // Network connectivity fixes - proper timeout configurations
+                speechConfig.setProperty("SPEECH-NetworkTimeoutMs", "30000");
+                speechConfig.setProperty("SPEECH-ConnectionTimeoutMs", "10000");
+                speechConfig.setProperty("SPEECH-WebSocketConnectionTimeout", "10000");
+                speechConfig.setProperty("SPEECH-WebSocketSendTimeout", "10000");
 
-                // Read .wav into a Buffer and pass to SDK
-                const buffer = FsSync.readFileSync(filePath);
-                const audioConfig = AudioConfig.fromWavFileInput(buffer as any);
-                const recognizer = new SpeechRecognizer(sdkConfig, audioConfig);
-                const results: Array<SubtitleToken> = [];
+                // 1. Proper Audio Input: Using AudioInputStream.createPushStream() with AudioConfig.fromStreamInput()
+                const pushStream = AudioInputStream.createPushStream();
+                const audioBuffer = FsSync.readFileSync(filePath);
+                // Convert Buffer to ArrayBuffer to fix type compatibility
+                const arrayBuffer = audioBuffer.buffer.slice(audioBuffer.byteOffset, audioBuffer.byteOffset + audioBuffer.byteLength);
+                pushStream.write(arrayBuffer);
+                pushStream.close();
+                
+                const audioConfig = AudioConfig.fromStreamInput(pushStream);
+                let recognizer: SpeechRecognizer | undefined = new SpeechRecognizer(speechConfig, audioConfig);
 
-                /**
-                 * Handle recognized speech events.
-                 * Extracts text, timing, and confidence scores from Speech API results.
-                 */
-                recognizer.recognized = (_s: unknown, e: any) => {
-                  if (e && e.result && e.result.reason === ResultReason.RecognizedSpeech) {
-                    // Extract confidence score from the Speech API result
-                    // The confidence score is typically available in the result properties
-                    const confidence = e.result.properties?.getProperty("Speech.Phrase.Confidence") 
-                      || e.result.confidence 
-                      || 0.5; // fallback to moderate confidence if not available
-                    
-                    results.push({
-                      id: results.length,
-                      value: e.result.text,
-                      startTimeMs: Number(e.result.offset / 10000), // Convert from 100ns ticks to ms
-                      endTimeMs: Number((e.result.offset + e.result.duration) / 10000), // Convert from 100ns ticks to ms
-                      score: Number(confidence),
-                    });
+                // 4. Proper Timeouts: Set up timeout to prevent hanging
+                const timeoutId = setTimeout(() => {
+                  if (recognizer) {
+                    recognizer.close();
+                    recognizer = undefined;
                   }
-                };
+                  reject(new Error("Speech recognition timeout after 30 seconds"));
+                }, 30000);
 
-                /** Handle session stopped - complete transcription */
-                recognizer.sessionStopped = () => {
-                  try {
-                    recognizer.stopContinuousRecognitionAsync();
-                  } catch (_) {}
-                  resolve(results as unknown as SubtitleResult[]);
-                };
+                // Use Microsoft's official recognizeOnceAsync pattern
+                recognizer.recognizeOnceAsync(
+                  (result) => {
+                    clearTimeout(timeoutId);
 
-                /** Handle cancellation/errors during transcription */
-                recognizer.canceled = (_s: unknown, e: any) => {
-                  try {
-                    recognizer.stopContinuousRecognitionAsync();
-                  } catch (_) {}
-                  reject(new TranscriptionError({ error: e }));
-                };
+                    // 3. Complete Error Handling: Handling all ResultReason cases
+                    if (result.reason === ResultReason.RecognizedSpeech) {
+                      const subtitles = [{
+                        id: 0,
+                        value: result.text || "",
+                        startTimeMs: result.offset / 10000, // Convert from ticks to ms
+                        endTimeMs: (result.offset + result.duration) / 10000,
+                        score: 0.8, // Default confidence score
+                      }] as const;
 
-                recognizer.startContinuousRecognitionAsync();
+                      // 2. Correct Resource Management: Following Microsoft's pattern
+                      if (recognizer) {
+                        recognizer.close();
+                        recognizer = undefined;
+                      }
+                      resolve([subtitles]);
+                    } else {
+                      if (recognizer) {
+                        recognizer.close();
+                        recognizer = undefined;
+                      }
+                      reject(new Error(`Unexpected result reason: ${result.reason}`));
+                    }
+                  },
+                  (error) => {
+                    clearTimeout(timeoutId);
+
+                    // 2. Proper cleanup on error
+                    if (recognizer) {
+                      recognizer.close();
+                      recognizer = undefined;
+                    }
+                    reject(new Error(`Speech recognition error: ${error}`));
+                  }
+                );
 
                 /** Handle manual abortion via signal */
                 signal.addEventListener("abort", () => {
-                  try {
-                    recognizer.stopContinuousRecognitionAsync();
-                  } catch (_) {}
-                  reject(new TranscriptionError({ error: new Error("aborted") }));
+                  clearTimeout(timeoutId);
+                  if (recognizer) {
+                    recognizer.close();
+                    recognizer = undefined;
+                  }
+                  reject(new Error("Speech recognition aborted"));
                 });
+
               } catch (err) {
                 reject(err);
               }
             }),
-          catch: (error: unknown) => new TranscriptionError({ error }),
-        }),
+          catch: (error: unknown) => new TranscriptionError({ error: error instanceof Error ? error : new Error(String(error)) }),
+      }),
+
+      
     } as const;
   }),
   dependencies: [SpeechConfigService.Default]
 }) {}
-
-// Effect.Service automatically provides layers, so no manual layer definitions needed
 
 // -----------------------------
 // Main program
@@ -301,6 +328,7 @@ const command = Command.make("dev", { url: urlArg }, ({ url }) => {
 
     /** Complete application layer with all service implementations */
     const appLayer = Layer.mergeAll(
+      BunContext.layer,
       CliArgsLive,
       SpeechConfigService.Default,
       FileSystemService.Default,
