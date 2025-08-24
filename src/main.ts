@@ -24,6 +24,8 @@ export class CliArgs extends Effect.Service<CliArgs>()("CliArgs", {
   succeed: { url: "" as YouTubeUrl }
 }) {}
 
+export { YouTubeDownloader, Transcription, FileSystemService };
+
 /**
  * Service for file system operations including temporary file management.
  * Handles creation and cleanup of temporary files for audio processing.
