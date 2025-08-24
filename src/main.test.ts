@@ -1,9 +1,7 @@
 import { Effect, Layer } from "effect";
 import { describe, it, expect } from "bun:test";
-import type { SubtitleResult, YouTubeUrl } from "./model";
+import type { SubtitleResult } from "./model";
 import { YoutubeDownloadError, TranscriptionError } from "./errors";
-import { CliArgs } from "./main";
-import { Console } from "effect/Console";
 
 /**
  * Test suite for the AI Subtitles MVP application.
