@@ -59,17 +59,16 @@ bun install
 Create a `.env` file in the project root or set the following environment variables:
 
 ```bash
-# Microsoft Cognitive Services Speech API
-SPEECH_KEY=your_speech_api_key_here
-SPEECH_REGION=your_region_here  # e.g., "eastus", "westus2"
+# AssemblyAI API Key
+ASSEMBLYAI_KEY=your_assemblyai_api_key_here
 ```
 
-### Getting Microsoft Speech API Keys
+### Getting AssemblyAI API Keys
 
-1. Go to the [Azure Portal](https://portal.azure.com)
-2. Create a new "Speech Services" resource
-3. Copy the API key and region from the resource overview
-4. Set the `SPEECH_KEY` and `SPEECH_REGION` environment variables
+1. Go to the [AssemblyAI website](https://www.assemblyai.com/)
+2. Sign up or log in.
+3. Navigate to your dashboard or API settings to find your API key.
+4. Set the `ASSEMBLYAI_KEY` environment variable.
 
 ## CLI Usage Examples
 
@@ -109,6 +108,24 @@ bun run dev <youtube-url>
 bun run start <youtube-url>
 ```
 
+## Development
+
+### Running Tests
+
+To run the unit and integration tests:
+
+```bash
+bun test
+```
+
+### Linting
+
+To run the linter and check for code style issues:
+
+```bash
+bun run lint
+```
+
 ## Architecture Overview
 
 ### Effect Framework Usage
@@ -125,7 +142,7 @@ This application demonstrates advanced Effect framework patterns:
 ### Core Services
 
 - **YouTubeDownloader**: Extracts audio streams from YouTube URLs using yt-dlp
-- **Transcription**: Processes audio through Microsoft Speech API
+- **Transcription**: Processes audio through AssemblyAI API
 - **FileSystemService**: Manages temporary file creation and cleanup  
 - **SpeechConfigService**: Handles API configuration from environment
 
@@ -133,16 +150,14 @@ This application demonstrates advanced Effect framework patterns:
 
 1. **Input Validation**: YouTube URL validated and parsed
 2. **Audio Extraction**: Video downloaded and converted to WAV format
-3. **Speech Recognition**: Audio processed through Microsoft Cognitive Services
+3. **Speech Recognition**: Audio processed through AssemblyAI
 4. **Output Generation**: Results formatted as JSON array of `SubtitleToken` objects
 
 ## Troubleshooting Guide
 
 ### Common Issues
 
-#### "SPEECH_KEY or SPEECH_REGION not set"
-- **Cause**: Missing or incorrect environment variables
-- **Solution**: Verify `.env` file contains valid `SPEECH_KEY` and `SPEECH_REGION`
+
 
 #### "yt-dlp exited with code 1"
 - **Cause**: Invalid YouTube URL or video not accessible
@@ -199,6 +214,6 @@ chmod +x ./yt-dlp
 - **Runtime**: Bun (ESNext modules)
 - **Language**: TypeScript (strict mode)
 - **Framework**: Effect with functional programming patterns
-- **Audio Processing**: yt-dlp → WAV conversion → Microsoft Speech SDK
+- **Audio Processing**: yt-dlp → WAV conversion → AssemblyAI
 - **Output Format**: JSON conforming to `SubtitleToken` interface
 # AI-Subtitles
