@@ -1,16 +1,11 @@
 import { Effect, Layer, Console, Config } from "effect";
+import * as S from "@effect/schema/Schema";
 import * as OS from "node:os";
 import * as Path from "node:path";
 import * as FS from "node:fs/promises";
 import * as FsSync from "node:fs";
 import { BunContext } from "@effect/platform-bun";
-import {
-  AudioConfig,
-  SpeechRecognizer,
-  ResultReason,
-  SpeechConfig as SpeechSDKConfig,
-  AudioInputStream,
-} from "microsoft-cognitiveservices-speech-sdk";
+
 import { Command, Args } from "@effect/cli";
 
 import { YoutubeDownloadError, TranscriptionError, InvalidUrlError } from "./errors";
@@ -25,7 +20,7 @@ import YtDlpWrap from "yt-dlp-wrap";
  * Service for providing CLI arguments to the application.
  * Contains the validated YouTube URL from command line input.
  */
-class CliArgs extends Effect.Service<CliArgs>()("CliArgs", {
+export class CliArgs extends Effect.Service<CliArgs>()("CliArgs", {
   succeed: { url: "" as YouTubeUrl }
 }) {}
 
@@ -78,7 +73,8 @@ class YouTubeDownloader extends Effect.Service<YouTubeDownloader>()("YouTubeDown
         Effect.acquireRelease(
           fs.makeTempFile("wav"),
           (file) => fs.cleanupFile(file)
-        ).pipe(
+        )
+        .pipe(
           Effect.flatMap((file) =>
             Effect.tryPromise({
               try: (signal: AbortSignal) =>
@@ -129,133 +125,106 @@ class YouTubeDownloader extends Effect.Service<YouTubeDownloader>()("YouTubeDown
   dependencies: [FileSystemService.Default]
 }) {}
 
-/**
- * Service for Microsoft Cognitive Services Speech API configuration.
- * Provides API key and region settings from environment variables.
- */
-class SpeechConfigService extends Effect.Service<SpeechConfigService>()("SpeechConfigService", {
+
+// -----------------------------
+// AssemblyAI Config Service
+// -----------------------------
+class AssemblyAIConfigService extends Effect.Service<AssemblyAIConfigService>()("AssemblyAIConfigService", {
   effect: Effect.gen(function* (_) {
-    const key = yield* _(Config.string("SPEECH_KEY"));
-    const region = yield* _(Config.string("SPEECH_REGION"));
-    return { 
-      /** Microsoft Speech API subscription key */
-      key, 
-      /** Azure region for the Speech service (e.g., "eastus", "westus2") */
-      region 
-    } as const;
-  })
+    const key = yield* _(Config.string("ASSEMBLYAI_KEY"));
+    return { key } as const;
+  }),
 }) {}
 
-/**
- * Service for transcribing audio files to subtitle tokens.
- * Uses Microsoft Cognitive Services Speech-to-Text API.
- */
+// -----------------------------
+// Transcription Service via AssemblyAI
+// -----------------------------
 class Transcription extends Effect.Service<Transcription>()("Transcription", {
   effect: Effect.gen(function* (_) {
-    const speechCfg = yield* _(SpeechConfigService);
+    const config = yield* _(AssemblyAIConfigService);
 
     return {
-      /**
-       * Transcribes an audio file to subtitle result with timing and confidence.
-       * @param audioFilePath - Path to the WAV audio file to transcribe
-       * @returns Effect that yields an array of subtitle tokens with timing and confidence scores
-       */
       transcribe: (filePath: string) =>
         Effect.tryPromise({
-          try: (signal: AbortSignal) =>
-            new Promise<SubtitleResult[]>((resolve, reject) => {
-              try {
-                const speechConfig = SpeechSDKConfig.fromSubscription(speechCfg.key, speechCfg.region);
-                speechConfig.speechRecognitionLanguage = "en-US";
-                
-                // Network connectivity fixes - proper timeout configurations
-                speechConfig.setProperty("SPEECH-NetworkTimeoutMs", "30000");
-                speechConfig.setProperty("SPEECH-ConnectionTimeoutMs", "10000");
-                speechConfig.setProperty("SPEECH-WebSocketConnectionTimeout", "10000");
-                speechConfig.setProperty("SPEECH-WebSocketSendTimeout", "10000");
-
-                // 1. Proper Audio Input: Using AudioInputStream.createPushStream() with AudioConfig.fromStreamInput()
-                const pushStream = AudioInputStream.createPushStream();
-                const audioBuffer = FsSync.readFileSync(filePath);
-                // Convert Buffer to ArrayBuffer to fix type compatibility
-                const arrayBuffer = audioBuffer.buffer.slice(audioBuffer.byteOffset, audioBuffer.byteOffset + audioBuffer.byteLength);
-                pushStream.write(arrayBuffer);
-                pushStream.close();
-                
-                const audioConfig = AudioConfig.fromStreamInput(pushStream);
-                let recognizer: SpeechRecognizer | undefined = new SpeechRecognizer(speechConfig, audioConfig);
-
-                // 4. Proper Timeouts: Set up timeout to prevent hanging
-                const timeoutId = setTimeout(() => {
-                  if (recognizer) {
-                    recognizer.close();
-                    recognizer = undefined;
-                  }
-                  reject(new Error("Speech recognition timeout after 30 seconds"));
-                }, 30000);
-
-                // Use Microsoft's official recognizeOnceAsync pattern
-                recognizer.recognizeOnceAsync(
-                  (result) => {
-                    clearTimeout(timeoutId);
-
-                    // 3. Complete Error Handling: Handling all ResultReason cases
-                    if (result.reason === ResultReason.RecognizedSpeech) {
-                      const subtitles = [{
-                        id: 0,
-                        value: result.text || "",
-                        startTimeMs: result.offset / 10000, // Convert from ticks to ms
-                        endTimeMs: (result.offset + result.duration) / 10000,
-                        score: 0.8, // Default confidence score
-                      }] as const;
-
-                      // 2. Correct Resource Management: Following Microsoft's pattern
-                      if (recognizer) {
-                        recognizer.close();
-                        recognizer = undefined;
-                      }
-                      resolve([subtitles]);
-                    } else {
-                      if (recognizer) {
-                        recognizer.close();
-                        recognizer = undefined;
-                      }
-                      reject(new Error(`Unexpected result reason: ${result.reason}`));
-                    }
-                  },
-                  (error) => {
-                    clearTimeout(timeoutId);
-
-                    // 2. Proper cleanup on error
-                    if (recognizer) {
-                      recognizer.close();
-                      recognizer = undefined;
-                    }
-                    reject(new Error(`Speech recognition error: ${error}`));
-                  }
-                );
-
-                /** Handle manual abortion via signal */
-                signal.addEventListener("abort", () => {
-                  clearTimeout(timeoutId);
-                  if (recognizer) {
-                    recognizer.close();
-                    recognizer = undefined;
-                  }
-                  reject(new Error("Speech recognition aborted"));
-                });
-
-              } catch (err) {
-                reject(err);
-              }
+          try: async (signal: AbortSignal) => {
+            
+            console.log("Reading audio file...");
+            const audioBuffer = await FS.readFile(filePath);
+            // const audioBlob = new Blob([audioBuffer]);
+            console.log("Uploading audio to AssemblyAI...");
+            
+            const uploadResp = await fetch("https://api.assemblyai.com/v2/upload", {
+              method: "POST",
+              headers: { "authorization": config.key, "Content-Type": "application/octet-stream" },
+              body: audioBuffer,
+            });
+            
+            const uploadData = await uploadResp.json() as { upload_url: string };
+            console.log("Upload complete:", uploadData.upload_url);
+            console.log("Requesting transcription...");
+            
+            const transcriptResp = await fetch("https://api.assemblyai.com/v2/transcript", {
+            method: "POST",
+            headers: { "authorization": config.key },
+            body: JSON.stringify({
+                audio_url: uploadData.upload_url,
+                speech_model: "universal",
             }),
-          catch: (error: unknown) => new TranscriptionError({ error: error instanceof Error ? error : new Error(String(error)) }),
-      }),
+            });
 
-      
+            const transcriptData = await transcriptResp.json() as { id: string };
+            const transcriptId = transcriptData.id;
+            console.log("Polling for transcription completion...");
+            let completed = false;
+            let transcriptText = "";
+            const MAX_POLL_TIME = 20 * 60 * 1000; // 20 minutes
+            const POLL_INTERVAL = 3000; // 3 seconds
+            let elapsed = 0;
+
+            while (!completed) {
+            if (signal.aborted) throw new Error("Transcription aborted");
+            if (elapsed > MAX_POLL_TIME) throw new Error("Transcription timed out");
+
+            const statusResp = await fetch(`https://api.assemblyai.com/v2/transcript/${transcriptId}`, {
+                headers: { authorization: config.key },
+            });
+
+            const statusData = await statusResp.json() as {
+                status: string;
+                text?: string;
+                words?: Array<{ text: string; start: number; end: number; confidence: number }>;
+                error?: string;
+            };
+              
+             if (statusData.status === "completed") {
+                completed = true;
+                transcriptText = statusData.text || "";
+                // Map words into SubtitleResult tokens
+                const subtitles = (statusData.words || []).map((w, i) => ({
+                    id: i,
+                    value: w.text,
+                    startTimeMs: w.start,
+                    endTimeMs: w.end,
+                    score: w.confidence,
+                }));
+
+                return subtitles;
+            } else if (statusData.status === "error") {
+                throw new Error(`AssemblyAI transcription failed: ${statusData.error}`);
+            } else {                                                     
+                await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+                elapsed += POLL_INTERVAL;
+            }
+        }
+        },
+          catch: (error: unknown) => {
+            console.error("Transcription failed:", error);
+            return new TranscriptionError({ error: error instanceof Error ? error : new Error(String(error)) });
+          },
+        }),
     } as const;
   }),
-  dependencies: [SpeechConfigService.Default]
+  dependencies: [AssemblyAIConfigService.Default],
 }) {}
 
 // -----------------------------
@@ -268,28 +237,23 @@ class Transcription extends Effect.Service<Transcription>()("Transcription", {
  * Process flow:
  * 1. Gets validated YouTube URL from CLI arguments
  * 2. Downloads and extracts audio from the YouTube video
- * 3. Transcribes the audio using Microsoft Speech API
+ * 3. Transcribes the audio using AssemblyAI
  * 4. Outputs the subtitle results as JSON
  * 
  * Uses Effect's dependency injection to access required services.
  */
-const program = Effect.gen(function* (_) {
+export const program = Effect.gen(function* (_) {
   const args = yield* _(CliArgs);
   const downloader = yield* _(YouTubeDownloader);
   const transcriber = yield* _(Transcription);
 
   yield* _(Console.log(`Processing URL: ${args.url}`));
-
   const audioFile = yield* _(downloader.getAudio(args.url));
-
   yield* _(Console.log(`Audio downloaded to: ${audioFile}`));
 
   const subtitles = yield* _(transcriber.transcribe(audioFile));
-
-  const jsonOutput = JSON.stringify(subtitles, null, 2);
-  yield* _(Console.log(jsonOutput));
+  yield* _(Console.log(JSON.stringify(subtitles, null, 2)));
 });
-
 // -----------------------------
 // CLI wiring
 // -----------------------------
@@ -313,9 +277,10 @@ const command = Command.make("dev", { url: urlArg }, ({ url }) => {
    * @returns Type guard indicating if URL is a valid YouTube URL
    */
   const isValidYouTubeUrl = (url: string): url is YouTubeUrl => {
-    const youtubeRegex = /^https?:\/\/(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[a-zA-Z0-9_-]{11}.*$/;
-    return youtubeRegex.test(url);
-  };
+  const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})$/; // Corrected regex escaping
+  return youtubeRegex.test(url);
+};
+
 
   const validateUrl = isValidYouTubeUrl(url)
     ? Effect.succeed(url as YouTubeUrl)
@@ -330,7 +295,7 @@ const command = Command.make("dev", { url: urlArg }, ({ url }) => {
     const appLayer = Layer.mergeAll(
       BunContext.layer,
       CliArgsLive,
-      SpeechConfigService.Default,
+      AssemblyAIConfigService.Default,
       FileSystemService.Default,
       YouTubeDownloader.Default,
       Transcription.Default
@@ -347,4 +312,6 @@ const cli = Command.run(command, {
 });
 
 // Execute the CLI with Bun runtime arguments
-Effect.runPromise(cli(Bun.argv) as Effect.Effect<void>).catch(console.error);
+if (import.meta.main) {
+  Effect.runPromise(cli(Bun.argv) as Effect.Effect<void>).catch(console.error);
+}
