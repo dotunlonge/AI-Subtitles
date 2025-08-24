@@ -1,18 +1,19 @@
 # AI Subtitles MVP
 
-A TypeScript CLI application that generates AI-powered subtitles from YouTube videos using Microsoft Cognitive Services Speech-to-Text API, built with the Effect framework.
+A TypeScript CLI application that generates AI-powered subtitles from YouTube videos using AssemblyAI Speech-to-Text API, built with the Effect framework.
 
 ## Project Setup and Installation
+
 
 ### Prerequisites
 
 - [Bun](https://bun.com) runtime (latest stable version)
-- Microsoft Azure Cognitive Services Speech subscription
+- AssemblyAI API key (free tier available)
 - **FFmpeg** - Required for YouTube audio extraction and conversion
 
 #### Installing FFmpeg
 
-FFmpeg is essential for converting YouTube audio to the WAV format required by Microsoft Speech API.
+FFmpeg is essential for converting YouTube audio to the WAV format required by AssemblyAI Speech-to-Text API.
 
 **macOS:**
 ```bash
@@ -54,6 +55,7 @@ bun install
 
 ## Environment Configuration
 
+
 ### Required API Keys
 
 Create a `.env` file in the project root or set the following environment variables:
@@ -62,6 +64,7 @@ Create a `.env` file in the project root or set the following environment variab
 # AssemblyAI API Key
 ASSEMBLYAI_KEY=your_assemblyai_api_key_here
 ```
+
 
 ### Getting AssemblyAI API Keys
 
@@ -143,8 +146,8 @@ This application demonstrates advanced Effect framework patterns:
 
 - **YouTubeDownloader**: Extracts audio streams from YouTube URLs using yt-dlp
 - **Transcription**: Processes audio through AssemblyAI API
-- **FileSystemService**: Manages temporary file creation and cleanup  
-- **SpeechConfigService**: Handles API configuration from environment
+- **FileSystemService**: Manages temporary file creation and cleanup
+- **AssemblyAIConfigService**: Handles API configuration from environment
 
 ### Data Flow
 
@@ -178,14 +181,14 @@ This application demonstrates advanced Effect framework patterns:
 - **Cause**: yt-dlp audio extraction problems or FFmpeg conversion failures
 - **Solutions**: 
   - Ensure FFmpeg is properly installed and accessible
-  - Application automatically converts to WAV format required by Speech API
+  - Application automatically converts to WAV format required by AssemblyAI
   - Check video accessibility (not private/age-restricted)
 
 #### Network/API errors
 - **Cause**: Network connectivity or API rate limits
 - **Solution**: 
   - Check internet connection
-  - Verify Azure Speech service quotas
+  - Verify AssemblyAI API quotas
   - Wait and retry for rate limit issues
 
 ### Debug Mode
@@ -216,4 +219,3 @@ chmod +x ./yt-dlp
 - **Framework**: Effect with functional programming patterns
 - **Audio Processing**: yt-dlp → WAV conversion → AssemblyAI
 - **Output Format**: JSON conforming to `SubtitleToken` interface
-# AI-Subtitles
