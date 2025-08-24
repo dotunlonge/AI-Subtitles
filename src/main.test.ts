@@ -1,7 +1,9 @@
 import { Effect, Layer } from "effect";
 import { describe, it, expect } from "bun:test";
-import type { SubtitleResult } from "./model";
+import type { SubtitleResult, YouTubeUrl } from "./model";
 import { YoutubeDownloadError, TranscriptionError } from "./errors";
+import { CliArgs } from "./main";
+import { Console } from "effect/Console";
 
 /**
  * Test suite for the AI Subtitles MVP application.
@@ -62,13 +64,12 @@ class FileSystemService extends Effect.Service<FileSystemService>()("FileSystemS
 }) {}
 
 /**
- * Mock service for speech configuration testing.
- * Provides test credentials without requiring real Azure setup.
+ * Mock service for AssemblyAI configuration testing.
+ * Provides test credentials without requiring real AssemblyAI setup.
  */
-class SpeechConfigService extends Effect.Service<SpeechConfigService>()("SpeechConfigService", {
+class AssemblyAIConfigService extends Effect.Service<AssemblyAIConfigService>()("AssemblyAIConfigService", {
   succeed: {
     key: "test-key",
-    region: "test-region"
   }
 }) {}
 
@@ -78,7 +79,7 @@ class SpeechConfigService extends Effect.Service<SpeechConfigService>()("SpeechC
  */
 const TestLayer = Layer.mergeAll(
   FileSystemService.Default,
-  SpeechConfigService.Default,
+  AssemblyAIConfigService.Default,
   YouTubeDownloader.Default,
   Transcription.Default
 );
@@ -129,7 +130,7 @@ describe("AI Subtitles MVP", () => {
 
       const testLayer = Layer.mergeAll(
         FileSystemService.Default,
-        SpeechConfigService.Default,
+        AssemblyAIConfigService.Default,
         FailingYouTubeDownloader.Default,
         Transcription.Default
       );
@@ -161,7 +162,7 @@ describe("AI Subtitles MVP", () => {
 
       const testLayer = Layer.mergeAll(
         FileSystemService.Default,
-        SpeechConfigService.Default,
+        AssemblyAIConfigService.Default,
         YouTubeDownloader.Default,
         FailingTranscription.Default
       );
@@ -222,12 +223,12 @@ describe("AI Subtitles MVP", () => {
 
   describe("Configuration", () => {
     /**
-     * Tests speech configuration service.
+     * Tests AssemblyAI configuration service.
      * Validates proper environment variable handling and credential management.
      */
-    it("should provide speech configuration", async () => {
+    it("should provide AssemblyAI configuration", async () => {
       const program = Effect.gen(function* (_) {
-        const config = yield* _(SpeechConfigService);
+        const config = yield* _(AssemblyAIConfigService);
         return config;
       });
 
@@ -236,7 +237,49 @@ describe("AI Subtitles MVP", () => {
       );
 
       expect(result.key).toBe("test-key");
-      expect(result.region).toBe("test-region");
     });
   });
+
+  describe("Main Application Flow", () => {
+  it("should run the main program and generate subtitles", async () => {
+  const logs: string[] = [];
+  const originalLog = console.log;
+  console.log = (msg: any, ...args: any[]) => {
+    logs.push(typeof msg === "string" ? msg : JSON.stringify(msg, null, 2));
+    if (args.length) logs.push(...args.map(a => typeof a === "string" ? a : JSON.stringify(a, null, 2)));
+  };
+
+  const { YouTubeDownloader, Transcription, FileSystemService, CliArgs, program } = await import("./main");
+  const mockYouTubeDownloader = {
+    getAudio: (_url: string) => Effect.succeed("/tmp/test-audio.wav")
+  };
+  const mockTranscription = {
+    transcribe: (_audioFile: string) =>
+      Effect.succeed([
+        {
+          id: 0,
+          value: "Test transcription",
+          startTimeMs: 1000,
+          endTimeMs: 3000,
+          score: 0.85
+        }
+      ])
+  };
+  const mockCliArgs = CliArgs.make({ url: "https://www.youtube.com/watch?v=test-video" as any });
+
+  const appLayer = FileSystemService.Default.pipe(
+    Layer.merge(Layer.succeed(YouTubeDownloader, mockYouTubeDownloader as any)),
+    Layer.merge(Layer.succeed(Transcription, mockTranscription as any)),
+    Layer.merge(Layer.succeed(CliArgs, mockCliArgs))
+  );
+
+  await Effect.runPromise(Effect.provide(program, appLayer).pipe(Effect.scoped));
+  console.log = originalLog;
+
+  expect(logs.some(msg => msg.includes("Processing URL:"))).toBe(true);
+  expect(logs.some(msg => msg.includes("Audio downloaded to:"))).toBe(true);
+  expect(logs.some(msg => msg.includes("Test transcription"))).toBe(true);
+});
+  });
+
 });
