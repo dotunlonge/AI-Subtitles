@@ -1,15 +1,11 @@
 import { Effect, Layer, Console, Config } from "effect";
-import * as S from "@effect/schema/Schema";
 import * as OS from "node:os";
 import * as Path from "node:path";
 import * as FS from "node:fs/promises";
-import * as FsSync from "node:fs";
 import { BunContext } from "@effect/platform-bun";
-
 import { Command, Args } from "@effect/cli";
-
 import { YoutubeDownloadError, TranscriptionError, InvalidUrlError } from "./errors";
-import type { SubtitleResult, SubtitleToken, YouTubeUrl } from "./model";
+import type { YouTubeUrl } from "./model";
 import YtDlpWrap from "yt-dlp-wrap";
 
 // -----------------------------
